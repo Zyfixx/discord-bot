@@ -8,6 +8,9 @@ const UNICODE = /<:(?:[a-zA-Z0-9_]+):(\d{15,22})>/;
 module.exports = {
     group: "fun",
     usage: "enlarge <emoji>",
+    examples: [
+        "enlarge :blob:"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("enlarge")

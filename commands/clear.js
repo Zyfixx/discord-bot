@@ -10,6 +10,11 @@ const FILTER_HELP = "Filters: `bots`, `humans`, `links`, or `contains:<text>` (c
 module.exports = {
     group: "moderation",
     usage: "clear [amount] [filters]",
+    examples: [
+        "clear",
+        "clear 25",
+        "clear bots"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("clear")

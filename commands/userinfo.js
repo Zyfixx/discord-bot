@@ -7,6 +7,10 @@ const { embed, fail } = require("../utils/feedback");
 module.exports = {
     group: "utility",
     usage: "userinfo [user]",
+    examples: [
+        "userinfo",
+        "userinfo @someone"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("userinfo")

@@ -9,6 +9,10 @@ const MAX = config.maxMuteDays * 86400 * 1000;
 module.exports = {
     group: "moderation",
     usage: "mute <user> [duration] [reason]",
+    examples: [
+        "mute @spammer 10m",
+        "mute @spammer 2h raiding"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("mute")

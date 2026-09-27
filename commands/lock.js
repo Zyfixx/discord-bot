@@ -9,6 +9,11 @@ const LOCKABLE = [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelT
 module.exports = {
     group: "moderation",
     usage: "lock <lock|unlock> [channel] [reason]",
+    examples: [
+        "lock",
+        "lock unlock",
+        "lock lock #general spoilers"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("lock")

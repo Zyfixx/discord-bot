@@ -9,6 +9,10 @@ const MAX = 21600;
 module.exports = {
     group: "moderation",
     usage: "slowmode <duration> [channel]",
+    examples: [
+        "slowmode 10s",
+        "slowmode 5m #general"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("slowmode")

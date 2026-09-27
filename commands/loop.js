@@ -11,6 +11,11 @@ const LABELS = {
 module.exports = {
     group: "music",
     usage: "loop [off|song|queue]",
+    examples: [
+        "loop",
+        "loop song",
+        "loop off"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("loop")

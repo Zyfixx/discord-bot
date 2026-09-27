@@ -7,6 +7,10 @@ const { embed, fail, requirePermission } = require("../utils/feedback");
 module.exports = {
     group: "utility",
     usage: "say <text> [channel]",
+    examples: [
+        "say hello there",
+        "say hello there #general"
+    ],
     help: "For prefix commands the channel goes **last**: `!say good morning #general`. The rest is sent as the message.",
 
     data: new SlashCommandBuilder()

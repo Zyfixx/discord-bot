@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require("discord.js");
 const config = require("../config");
 const { commands } = require("../handlers/commandHandler");
 const { embed, fail, respond } = require("../utils/feedback");
+const { buildUsage, buildArguments, buildExamples, clamp } = require("../utils/usage");
 
 const GROUP_LABELS = {
     utility: "Utility",
@@ -28,6 +29,11 @@ function fuzzyMatch(query) {
 module.exports = {
     group: "utility",
     usage: "help [command]",
+    examples: [
+        "help",
+        "help play",
+        "help server info"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("help")
@@ -55,19 +61,19 @@ module.exports = {
             if (!command) return fail(ctx, "Unknown command", `There is no command called \`${query}\`.`);
 
             const { data } = command;
-            const options = data.options?.length
-                ? data.options
-                      .map((o) => `\`${o.name}\` — ${o.description} (${o.type === 6 ? "user" : o.type === 7 ? "channel" : o.type === 3 ? "text" : "number"}${o.required ? "" : ", optional"})`)
-                      .join("\n")
-                : null;
+            const usage = buildUsage(command);
+            const args = buildArguments(command);
+            const examples = buildExamples(command);
 
             return respond(ctx, {
                 title: `/${data.name}`,
                 description: command.help ? `${data.description}\n${command.help}` : data.description,
                 fields: [
+                    { name: "Usage", value: usage, inline: false },
+                    ...(args ? [{ name: "Arguments", value: args, inline: false }] : []),
+                    ...(examples ? [{ name: "Examples", value: examples, inline: false }] : []),
                     { name: "Category", value: GROUP_LABELS[command.group] ?? "General", inline: true },
-                    { name: "Prefix", value: `\`${config.prefix}${data.name}\``, inline: true },
-                    ...(options ? [{ name: "Options", value: options }] : [])
+                    { name: "Cooldown", value: command.cooldown ? `${command.cooldown}s` : "None", inline: true }
                 ]
             });
         }
@@ -85,18 +91,29 @@ module.exports = {
 
         for (const [group, list] of groups) {
             const sorted = [...list].sort((a, b) => a.data.name.localeCompare(b.data.name));
+
             fields.push({
                 name: `${GROUP_LABELS[group] ?? group} (${sorted.length})`,
-                value: sorted
-                    .map((c) => `\`/${c.data.name}\` — ${c.data.description}`)
-                    .join("\n")
+                value: clamp(
+                    sorted
+                        .map((c) => {
+                            const required = (c.data.options ?? []).some((option) => option.required);
+                            return `\`/${c.data.name}\`${required ? " ✱" : ""} — ${c.data.description}`;
+                        })
+                        .join("\n")
+                )
             });
         }
 
         return respond(ctx, {
             color: config.colors.info,
             title: "Command list",
-            description: `${total} commands • prefix \`${config.prefix}\` • every command works with both \`/name\` and \`${config.prefix}name\``,
+            description: [
+                `${total} commands • prefix \`${config.prefix}\``,
+                "Every command works as `/name` or with the prefix.",
+                "✱ marks commands that need at least one argument.",
+                "Run `/help <command>` for arguments and examples."
+            ].join("\n"),
             fields
         });
     }

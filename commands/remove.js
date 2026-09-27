@@ -5,6 +5,9 @@ const { requireQueue, requireSameVoice, safeUrl } = require("../utils/music");
 module.exports = {
     group: "music",
     usage: "remove <position>",
+    examples: [
+        "remove 3"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("remove")

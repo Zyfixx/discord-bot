@@ -9,6 +9,10 @@ const afk = new Map();
 module.exports = {
     group: "utility",
     usage: "afk [reason]",
+    examples: [
+        "afk",
+        "afk grabbing food"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("afk")

@@ -7,6 +7,10 @@ const { embed, fail, requirePermission } = require("../utils/feedback");
 module.exports = {
     group: "moderation",
     usage: "kick <user> [reason]",
+    examples: [
+        "kick @spammer",
+        "kick @spammer raiding again"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("kick")

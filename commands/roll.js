@@ -24,6 +24,11 @@ function parseDice(input) {
 module.exports = {
     group: "fun",
     usage: "roll [2d6|d20|10]",
+    examples: [
+        "roll",
+        "roll d20",
+        "roll 2d6"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("roll")

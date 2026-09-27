@@ -6,6 +6,11 @@ const { getDistube, normalizeQuery, resolveVoice, queueList, safeUrl } = require
 module.exports = {
     group: "music",
     usage: "play <song url or search>",
+    examples: [
+        "play bohemian rhapsody",
+        "play https://open.spotify.com/track/2Foc5Q5nqNiosCNqttzHof",
+        "play spotify:album:2guirTSEqLizK7j9i1MTTZ"
+    ],
     help: [
         "Spotify track, album, playlist and artist links work, including `spotify:` share links.",
         "Only the details come from Spotify — the audio is matched on YouTube."

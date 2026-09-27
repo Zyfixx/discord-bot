@@ -299,6 +299,11 @@ function validateEquation(expr, expectedCards, mode) {
 module.exports = {
     group: "fun",
     usage: "24 [mode:casual|chaos] [rounds (0 for infinite)]",
+    examples: [
+        "24",
+        "24 chaos",
+        "24 casual 5"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("24")

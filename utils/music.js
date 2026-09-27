@@ -1,8 +1,9 @@
 require("./ytdlp").setupYtDlp();
 
-const { DisTube, Events, formatDuration } = require("distube");
+const { DisTube, Events, Playlist, Song, formatDuration } = require("distube");
 const { SpotifyPlugin } = require("@distube/spotify");
-const { YtDlpPlayPlugin, YtDlpSearchPlugin } = require("./ytdlpPlugin");
+const { YtDlpPlayPlugin, YtDlpSearchPlugin, searchPluginOf } = require("./ytdlpPlugin");
+const { streamUrlOnce, hasKnownStream } = require("./ytdlp");
 const config = require("../config");
 const { embed, fail, requireGuild } = require("./feedback");
 
@@ -62,6 +63,10 @@ function getDistube(client) {
             .catch(() => {});
     });
 
+    distube.on(Events.PLAY_SONG, (song, queue) => {
+        prefetchNextSong(queue);
+    });
+
     distube.on(Events.FINISH, (queue) => {
         if (queue.songs.length) return;
 
@@ -84,6 +89,35 @@ function getDistube(client) {
 function getQueue(ctx) {
     if (!ctx.guild) return undefined;
     return getDistube(ctx.client).getQueue(ctx.guild);
+}
+
+/**
+ * Warms up the next track while the current one is still playing.
+ *
+ * DisTube resolves a song at the moment it starts, which means the YouTube
+ * lookup happens in the silence between tracks. Measured on a slow connection
+ * that was 13s for a playlist entry and 22s for a Spotify or album track, so
+ * every song change stalled. Resolving ahead of time removes the wait, because
+ * by the time the track is due the answer is already cached.
+ */
+function prefetchNextSong(queue) {
+    const next = queue?.songs?.[1];
+    if (!next) return Promise.resolve();
+
+    // A track that is already playable only needs its stream URL, unless the
+    // metadata came back with one already, in which case there is nothing to do.
+    if (next.stream?.playFromSource !== false) {
+        if (hasKnownStream(next.url)) return Promise.resolve();
+        return streamUrlOnce(next.url).catch(() => {});
+    }
+
+    // Otherwise it has to be matched on YouTube first, which is the slower path.
+    const search = searchPluginOf(getDistube(queue.client));
+    if (!search) return Promise.resolve();
+
+    return Promise.resolve(next.plugin?.createSearchQuery?.(next))
+        .then((query) => (query ? search.prefetch(query) : undefined))
+        .catch(() => {});
 }
 
 function requireQueue(ctx) {
@@ -160,6 +194,45 @@ function isConnected(ctx) {
     const distube = getDistube(ctx.client);
     return Boolean(distube.getQueue(ctx.guild)?.voice ?? distube.voices?.get(ctx.guild?.id));
 }
+
+/**
+ * Turns an album and its tracklist into a DisTube playlist.
+ *
+ * The songs carry no audio, so this is instant. They are marked
+ * `playFromSource: false` and given the Spotify plugin, whose
+ * `createSearchQuery` turns each title into a search term. DisTube then matches
+ * that on YouTube one track at a time, as each track starts, so a whole album is
+ * queued immediately rather than after every track has been resolved.
+ */
+function buildAlbumPlaylist(client, album, tracks) {
+    const spotify = getDistube(client).plugins.find((plugin) => plugin.constructor.name === "SpotifyPlugin");
+    if (!spotify) return null;
+
+    const songs = tracks.map((track) =>
+        new Song({
+            plugin: spotify,
+            source: "album",
+            playFromSource: false,
+            name: track.name,
+            url: album.url || `https://itunes.apple.com/album/${album.id}`,
+            thumbnail: track.thumbnail ?? album.thumbnail,
+            uploader: { name: track.artist || album.artist },
+            duration: track.duration || 0
+        })
+    );
+
+    if (!songs.length) return null;
+
+    return new Playlist({
+        plugin: spotify,
+        source: "album",
+        name: album.name,
+        url: album.url || `https://itunes.apple.com/album/${album.id}`,
+        thumbnail: album.thumbnail,
+        songs
+    });
+}
+
 
 function progressBar(current, total, size = 14) {
     const ratio = total > 0 ? Math.min(Math.max(current / total, 0), 1) : 0;
@@ -260,6 +333,8 @@ module.exports = {
     requireSameVoice,
     resolveVoice,
     isConnected,
+    buildAlbumPlaylist,
+    prefetchNextSong,
     normalizeQuery,
     nowPlayingEmbed,
     queueList,

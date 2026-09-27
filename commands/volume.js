@@ -5,6 +5,11 @@ const { requireQueue, requireSameVoice, progressBar } = require("../utils/music"
 module.exports = {
     group: "music",
     usage: "volume [0-100]",
+    examples: [
+        "volume 50",
+        "volume 0",
+        "volume 100"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("volume")

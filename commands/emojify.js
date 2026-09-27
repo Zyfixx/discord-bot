@@ -7,6 +7,9 @@ const NITRO = [":moneybag:", ":heavy_heart_exclamation_mark:", ":bug:", ":wasteb
 module.exports = {
     group: "fun",
     usage: "emojify <text>",
+    examples: [
+        "emojify hello world"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("emojify")

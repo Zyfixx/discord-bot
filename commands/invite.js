@@ -6,6 +6,10 @@ const { embed, fail, requireGuild, requirePermission } = require("../utils/feedb
 module.exports = {
     group: "utility",
     usage: "invite",
+    examples: [
+        "invite",
+        "invite joining my server"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("invite")

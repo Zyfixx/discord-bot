@@ -6,6 +6,9 @@ const { embed, fail, requirePermission } = require("../utils/feedback");
 module.exports = {
     group: "moderation",
     usage: "unmute <user> [reason]",
+    examples: [
+        "unmute @someone"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("unmute")

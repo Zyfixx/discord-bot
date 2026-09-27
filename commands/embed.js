@@ -50,6 +50,11 @@ function unescape(value) {
 module.exports = {
     group: "fun",
     usage: "embed <description> [title] [color] [footer] [image url]",
+    examples: [
+        "embed hello there",
+        "embed hello || My Title",
+        "embed hello | My Title | #ff0000"
+    ],
     help: [
         "Split the parts with `|`, or label them so order does not matter: `description:… | color:red`.",
         "Short labels work too: `d:` `t:` `c:` `f:` `i:`.",

@@ -35,5 +35,12 @@ module.exports = {
         warning: 0xfee75c,
         info: 0x5eb5f7,
         neutral: 0x4e5058
+    },
+
+    albums: {
+        // The iTunes lookup is a third-party service; allow disabling it and
+        // tune how many tracks a single /album may add to the queue.
+        enabled: (process.env.ALBUM_SEARCH || "true").toLowerCase() !== "false",
+        maxTracks: Math.max(1, Number.parseInt(process.env.ALBUM_MAX_TRACKS || "50", 10) || 50)
     }
 };

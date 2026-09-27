@@ -7,6 +7,10 @@ const { embed, fail, requirePermission } = require("../utils/feedback");
 module.exports = {
     group: "moderation",
     usage: "ban <user> [reason] [days]",
+    examples: [
+        "ban @spammer",
+        "ban @spammer raiding 3"
+    ],
     help: "For prefix commands the reason keeps its spaces and `days` goes **last**: `!ban @user spamming everywhere 3`.",
 
     data: new SlashCommandBuilder()

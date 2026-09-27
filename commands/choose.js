@@ -5,6 +5,9 @@ const { embed, fail } = require("../utils/feedback");
 module.exports = {
     group: "fun",
     usage: "choose <a, b, c>",
+    examples: [
+        "choose pizza, sushi, tacos"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("choose")

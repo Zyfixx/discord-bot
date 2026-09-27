@@ -27,6 +27,9 @@ const ANSWERS = [
 module.exports = {
     group: "fun",
     usage: "8ball <question>",
+    examples: [
+        "8ball will it rain tomorrow"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("8ball")

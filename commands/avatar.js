@@ -6,6 +6,11 @@ const { embed, fail } = require("../utils/feedback");
 module.exports = {
     group: "utility",
     usage: "avatar [user] [server]",
+    examples: [
+        "avatar",
+        "avatar @someone",
+        "avatar @someone server"
+    ],
 
     data: new SlashCommandBuilder()
         .setName("avatar")
