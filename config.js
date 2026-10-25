@@ -20,14 +20,6 @@ module.exports = {
     maxMuteDays: 28,
     footer: process.env.FOOTER_TEXT || null,
 
-    // Optional. Without these the Spotify plugin falls back to scraping public
-    // metadata, which works but caps playlists and albums at 100 tracks.
-    spotify: {
-        clientId: process.env.SPOTIFY_CLIENT_ID || null,
-        clientSecret: process.env.SPOTIFY_CLIENT_SECRET || null,
-        topTracksCountry: process.env.SPOTIFY_TOP_TRACKS_COUNTRY || "US"
-    },
-
     colors: {
         primary: 0x5865f2,
         success: 0x57f287,
@@ -38,9 +30,32 @@ module.exports = {
     },
 
     albums: {
-        // The iTunes lookup is a third-party service; allow disabling it and
+        // The Deezer lookup is a third-party service; allow disabling it and
         // tune how many tracks a single /album may add to the queue.
         enabled: (process.env.ALBUM_SEARCH || "true").toLowerCase() !== "false",
         maxTracks: Math.max(1, Number.parseInt(process.env.ALBUM_MAX_TRACKS || "50", 10) || 50)
+    },
+
+    lavalink: {
+        // Address and password of the Lavalink v4 server that does the audio
+        // work. The bot never downloads or transcodes audio itself; it only
+        // asks Lavalink to resolve and play tracks.
+        host: process.env.LAVALINK_HOST || "127.0.0.1",
+        port: Math.max(1, Number.parseInt(process.env.LAVALINK_PORT || "2333", 10) || 2333),
+        password: process.env.LAVALINK_PASSWORD || "",
+        secure: (process.env.LAVALINK_SECURE || "false").toLowerCase() === "true",
+        name: process.env.LAVALINK_NAME || "main",
+
+        // Lavalink and NodeLink expose the same v4 API but NodeLink needs its
+        // own client class for voice and track handling.
+        nodeType: process.env.LAVALINK_NODE_TYPE || "Lavalink",
+
+        // Source Lavalink uses for plain text searches. YouTube Music
+        // ("ytmsearch") gives better music results when the server has it
+        // enabled; "ytsearch" is the safest default.
+        search: process.env.LAVALINK_SEARCH || "ytsearch",
+
+        // Volume new players start at, from 0 to 100.
+        volume: Math.min(Math.max(Number.parseInt(process.env.LAVALINK_VOLUME || "100", 10) || 100, 0), 100)
     }
 };

@@ -3,10 +3,12 @@ const { done, fail } = require("../utils/feedback");
 const { requireQueue, requireSameVoice } = require("../utils/music");
 
 const LABELS = {
-    0: "Repeat off",
-    1: "Repeating the current song",
-    2: "Repeating the whole queue"
+    off: "Repeat off",
+    track: "Repeating the current song",
+    queue: "Repeating the whole queue"
 };
+
+const ORDER = ["off", "track", "queue"];
 
 module.exports = {
     group: "music",
@@ -32,22 +34,23 @@ module.exports = {
         ),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
         const mode = ctx.args[0]?.toString().toLowerCase();
-        const resolved = mode === "off" ? 0 : mode === "song" ? 1 : mode === "queue" ? 2 : undefined;
+        const resolved = mode === "off" ? "off" : mode === "song" ? "track" : mode === "queue" ? "queue" : undefined;
 
         if (mode && resolved === undefined) {
             return fail(ctx, "Bad repeat mode", "Use `off`, `song`, or `queue`.");
         }
 
-        const result = queue.setRepeatMode(resolved);
+        const next = resolved ?? ORDER[(ORDER.indexOf(player.repeatMode) + 1) % ORDER.length];
+        await player.setRepeatMode(next);
 
         return done(ctx, {
             title: "🔁 Repeat updated",
-            description: LABELS[result]
+            description: LABELS[next]
         });
     }
 };

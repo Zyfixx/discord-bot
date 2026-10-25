@@ -1,130 +1,257 @@
-require("./ytdlp").setupYtDlp();
-
-const { DisTube, Events, Playlist, Song, formatDuration } = require("distube");
-const { SpotifyPlugin } = require("@distube/spotify");
-const { YtDlpPlayPlugin, YtDlpSearchPlugin, searchPluginOf } = require("./ytdlpPlugin");
-const { streamUrlOnce, hasKnownStream } = require("./ytdlp");
+const { LavalinkManager } = require("lavalink-client");
 const config = require("../config");
 const { embed, fail, requireGuild } = require("./feedback");
 
-let distube = null;
+let manager = null;
+let initStarted = false;
 
 /**
- * True when nobody but the bot is sitting in the channel.
+ * The Lavalink manager for this process.
  *
- * An unreadable member list counts as occupied so a missing cache can never be
- * used to take the bot away from an audience.
+ * Constructed lazily because it needs the Discord client for its voice payload
+ * bridge, but everything that talks to Lavalink (the nodes) starts in
+ * initMusic() once the bot is logged in.
  */
+function getLavalink(client) {
+    if (manager) return manager;
+    if (!client) throw new Error("The music service is not ready yet.");
+
+    const { host, port, password, secure, name, nodeType, search, volume } = config.lavalink;
+
+    manager = new LavalinkManager({
+        nodes: [
+            {
+                id: name,
+                host,
+                port,
+                authorization: password,
+                secure,
+                nodeType,
+                requestSignalTimeoutMS: 30000
+            }
+        ],
+        sendToShard(guildId, payload) {
+            const guild = client.guilds.cache.get(guildId);
+            if (guild?.shard) guild.shard.send(payload);
+            else client.ws.send(payload);
+        },
+        autoSkip: true,
+        autoSkipOnResolveError: true,
+        playerOptions: {
+            defaultSearchPlatform: search,
+            useUnresolvedData: true,
+            volumeDecrementer: 1,
+            onDisconnect: {
+                autoReconnect: true,
+                destroyPlayer: false
+            },
+            onEmptyQueue: {
+                autoPlayFunction: autoplay
+            }
+        },
+        queueOptions: {
+            maxPreviousTracks: 25
+        }
+    });
+
+    manager.nodeManager.on("connect", (node) => {
+        console.log(`[lavalink] connected to ${node.id} (${node.host}:${node.port})`);
+    });
+
+    manager.nodeManager.on("error", (node, error) => {
+        console.error(`[lavalink] ${node.id}: ${error.message}`);
+    });
+
+    manager.nodeManager.on("disconnect", (node, reason) => {
+        console.warn(`[lavalink] disconnected from ${node.id}${reason?.reason ? `: ${reason.reason}` : ""}`);
+    });
+
+    manager.on("trackError", (player, track, payload) => {
+        const message = payload?.exception?.message || payload?.error || "That track could not be played.";
+        console.error(`[lavalink] ${message}`);
+        notify(client, player, config.colors.danger, "⚠️ Playback error", message);
+    });
+
+    manager.on("trackStuck", (player, track, payload) => {
+        const seconds = Math.round((payload?.thresholdMs ?? 0) / 1000);
+        notify(
+            client,
+            player,
+            config.colors.warning,
+            "⚠️ Playback stalled",
+            `The track stopped responding and was skipped after ${seconds}s.`
+        );
+    });
+
+    manager.on("queueEnd", (player, track, payload) => {
+        // stop/leave clear the queue on purpose; those already answer the user.
+        if (payload?.reason === "stopped") return;
+
+        notify(
+            client,
+            player,
+            config.colors.neutral,
+            null,
+            `🎧 Queue finished. Use \`${config.prefix}leave\` if you want me to disconnect.`
+        );
+    });
+
+    return manager;
+}
+
+/** Starts the node connections and wires Lavalink's voice data into Discord. */
+function initMusic(client) {
+    const lavalink = getLavalink(client);
+
+    if (!initStarted) {
+        initStarted = true;
+
+        client.on("raw", (data) => {
+            lavalink.sendRawData(data).catch(() => {});
+        });
+    }
+
+    if (!config.lavalink.password) {
+        console.warn("[lavalink] LAVALINK_PASSWORD is empty; music will not connect until it is set in .env.");
+        return lavalink;
+    }
+
+    if (!lavalink.initiated) {
+        lavalink.init({ id: client.user.id, username: client.user.username }).catch((error) => {
+            console.error(`[lavalink] could not connect: ${error.message}`);
+        });
+    }
+
+    return lavalink;
+}
+
+function describeLavalink() {
+    const { host, port, secure, password, nodeType } = config.lavalink;
+    const scheme = secure ? "wss" : "ws";
+    const note = password ? "" : " [no password set]";
+    return `${nodeType.toLowerCase()}: ${scheme}://${host}:${port}${note}`;
+}
+
+function notify(client, player, color, title, description) {
+    if (!player?.textChannelId) return;
+
+    const channel = client.channels.cache.get(player.textChannelId);
+    if (!channel?.send) return;
+
+    channel.send({ embeds: [embed({ color, title, description, timestamp: false })] }).catch(() => {});
+}
+
+/** True when nobody but the bot is sitting in the channel. */
 function isChannelEmpty(channel) {
     const members = channel?.members;
     if (!members || typeof members.filter !== "function") return false;
     return members.filter((member) => !member.user?.bot).size === 0;
 }
 
-function getDistube(client) {
-    if (distube) return distube;
-
-    const ytdlp = new YtDlpPlayPlugin();
-    const spotify = new SpotifyPlugin({
-        api: {
-            clientId: config.spotify.clientId ?? undefined,
-            clientSecret: config.spotify.clientSecret ?? undefined,
-            topTracksCountry: config.spotify.topTracksCountry
-        }
-    });
-
-    distube = new DisTube(client, {
-        // Order matters. SpotifyPlugin is an info-extractor: it only reads
-        // metadata and hands the real audio off to the search plugin, because
-        // Spotify streams are DRM protected and cannot be downloaded directly.
-        // The YouTube play plugin must stay last so it is consulted for links.
-        plugins: [spotify, new YtDlpSearchPlugin(ytdlp), ytdlp],
-        emitAddSongWhenCreatingQueue: false,
-        emitAddListWhenCreatingQueue: false,
-        savePreviousSongs: true,
-        joinNewVoiceChannel: true,
-        nsfw: false
-    });
-
-    distube.on(Events.ERROR, (error, queue) => {
-        console.error(`[music] ${error.message}`);
-
-        queue?.textChannel
-            ?.send({
-                embeds: [
-                    embed({
-                        color: config.colors.danger,
-                        title: "⚠️ Playback error",
-                        description: `${error.message}`,
-                        timestamp: false
-                    })
-                ]
-            })
-            .catch(() => {});
-    });
-
-    distube.on(Events.PLAY_SONG, (song, queue) => {
-        prefetchNextSong(queue);
-    });
-
-    distube.on(Events.FINISH, (queue) => {
-        if (queue.songs.length) return;
-
-        queue.textChannel
-            ?.send({
-                embeds: [
-                    embed({
-                        color: config.colors.neutral,
-                        description: `🎧 Queue finished. Use \`${config.prefix}leave\` if you want me to disconnect.`,
-                        timestamp: false
-                    })
-                ]
-            })
-            .catch(() => {});
-    });
-
-    return distube;
-}
-
-function getQueue(ctx) {
-    if (!ctx.guild) return undefined;
-    return getDistube(ctx.client).getQueue(ctx.guild);
+function getPlayer(ctx) {
+    if (!ctx?.guild) return undefined;
+    return getLavalink(ctx.client).getPlayer(ctx.guild.id);
 }
 
 /**
- * Warms up the next track while the current one is still playing.
- *
- * DisTube resolves a song at the moment it starts, which means the YouTube
- * lookup happens in the silence between tracks. Measured on a slow connection
- * that was 13s for a playlist entry and 22s for a Spotify or album track, so
- * every song change stalled. Resolving ahead of time removes the wait, because
- * by the time the track is due the answer is already cached.
+ * Gets the player for this guild or creates one, then makes sure it is
+ * connected to the requested voice channel.
  */
-function prefetchNextSong(queue) {
-    const next = queue?.songs?.[1];
-    if (!next) return Promise.resolve();
+async function ensurePlayer(ctx, voice) {
+    const lavalink = getLavalink(ctx.client);
+    let player = lavalink.getPlayer(ctx.guild.id);
 
-    // A track that is already playable only needs its stream URL, unless the
-    // metadata came back with one already, in which case there is nothing to do.
-    if (next.stream?.playFromSource !== false) {
-        if (hasKnownStream(next.url)) return Promise.resolve();
-        return streamUrlOnce(next.url).catch(() => {});
+    if (!player) {
+        player = lavalink.createPlayer({
+            guildId: ctx.guild.id,
+            voiceChannelId: voice.id,
+            textChannelId: ctx.channel.id,
+            volume: config.lavalink.volume,
+            selfDeaf: true,
+            selfMute: false
+        });
+    } else {
+        player.textChannelId = ctx.channel.id;
+
+        if (player.voiceChannelId !== voice.id) {
+            if (player.voiceChannelId) await player.changeVoiceState({ voiceChannelId: voice.id });
+            else player.options.voiceChannelId = voice.id;
+        }
     }
 
-    // Otherwise it has to be matched on YouTube first, which is the slower path.
-    const search = searchPluginOf(getDistube(queue.client));
-    if (!search) return Promise.resolve();
+    if (!player.connected) await player.connect();
 
-    return Promise.resolve(next.plugin?.createSearchQuery?.(next))
-        .then((query) => (query ? search.prefetch(query) : undefined))
-        .catch(() => {});
+    return player;
+}
+
+/**
+ * Resolves a search term or link and returns Lavalink's result.
+ *
+ * Plain text goes through LAVALINK_SEARCH; links are handed to Lavalink as-is,
+ * so whichever source plugins the server has decide what can be played.
+ */
+async function searchTracks(player, query, requester) {
+    const result = await player.search(query, requester);
+
+    if (result.loadType === "error") {
+        throw new Error(result.exception?.message || "The music server could not resolve that link.");
+    }
+
+    if (!result.tracks?.length) {
+        throw new Error("No results were found for that search.");
+    }
+
+    return result;
+}
+
+/** Adds tracks and starts playback when the player was idle. */
+async function addTracks(player, tracks) {
+    player.queue.add(tracks);
+
+    if (!player.queue.current && !player.paused) await player.play();
+}
+
+/**
+ * Keeps the music going when the queue runs out and the user enabled autoplay.
+ *
+ * Lavalink has no cross-source recommendation API, so the closest signal is the
+ * artist of the last track. Duplicates already seen in this session are
+ * filtered out, and failures are swallowed so autoplay can never break the
+ * player.
+ */
+async function autoplay(player, lastTrack) {
+    if (!player.getData("autoplay") || !lastTrack?.info) return;
+
+    const query = lastTrack.info.author || lastTrack.info.title;
+    if (!query) return;
+
+    try {
+        const result = await player.search(query, lastTrack.requester ?? {});
+        const known = new Set(
+            [lastTrack, ...player.queue.previous, ...player.queue.tracks].map((track) => track.info?.identifier)
+        );
+
+        const picks = result.tracks
+            .filter(
+                (track) =>
+                    track.info &&
+                    !track.info.isStream &&
+                    track.info.duration >= 60_000 &&
+                    !known.has(track.info.identifier)
+            )
+            .slice(0, 5);
+
+        if (picks.length) player.queue.add(picks);
+    } catch {
+        /* autoplay is best effort */
+    }
 }
 
 function requireQueue(ctx) {
     if (!requireGuild(ctx)) return null;
 
-    const queue = getQueue(ctx);
-    if (queue) return queue;
+    const player = getPlayer(ctx);
+    if (player && (player.queue.current || player.queue.tracks.length)) return player;
 
     fail(ctx, "Nothing playing", "There is no active music queue in this server.");
     return null;
@@ -140,12 +267,17 @@ function requireVoice(ctx) {
     return null;
 }
 
-function requireSameVoice(ctx, queue) {
+function requireSameVoice(ctx, player) {
     const userChannel = ctx.member?.voice?.channelId;
-    const botChannel = queue?.voice?.channel?.id ?? queue?.voiceChannel?.id;
+    const botChannel = player?.voiceChannelId;
 
     if (!userChannel) {
         fail(ctx, "Not in a voice channel", "Join a voice channel first, then run the command again.");
+        return false;
+    }
+
+    if (!botChannel) {
+        fail(ctx, "Not connected", "I am not connected to a voice channel. Use `play` to start some music.");
         return false;
     }
 
@@ -174,9 +306,9 @@ function resolveVoice(ctx) {
         return null;
     }
 
-    const queue = getQueue(ctx);
-    const current = queue?.voice?.channel;
-    const busy = Boolean(current) && (queue.songs?.length > 0 || queue.current);
+    const player = getPlayer(ctx);
+    const current = player?.voiceChannelId ? ctx.guild.channels.cache.get(player.voiceChannelId) : null;
+    const busy = Boolean(current) && Boolean(player?.queue.current || player?.queue.tracks.length);
 
     if (busy && current.id !== target.id && !isChannelEmpty(current)) {
         fail(
@@ -191,48 +323,47 @@ function resolveVoice(ctx) {
 }
 
 function isConnected(ctx) {
-    const distube = getDistube(ctx.client);
-    return Boolean(distube.getQueue(ctx.guild)?.voice ?? distube.voices?.get(ctx.guild?.id));
+    if (!ctx.guild) return false;
+    return Boolean(getLavalink(ctx.client).getPlayer(ctx.guild.id)?.voiceChannelId);
 }
 
 /**
- * Turns an album and its tracklist into a DisTube playlist.
+ * Turns an album and its tracklist into Lavalink unresolved tracks.
  *
- * The songs carry no audio, so this is instant. They are marked
- * `playFromSource: false` and given the Spotify plugin, whose
- * `createSearchQuery` turns each title into a search term. DisTube then matches
- * that on YouTube one track at a time, as each track starts, so a whole album is
- * queued immediately rather than after every track has been resolved.
+ * Nothing is looked up here: each track keeps the album title, artist and
+ * duration, and Lavalink matches it against the default search source only
+ * when it is about to play. That is what lets a whole album queue immediately.
  */
-function buildAlbumPlaylist(client, album, tracks) {
-    const spotify = getDistube(client).plugins.find((plugin) => plugin.constructor.name === "SpotifyPlugin");
-    if (!spotify) return null;
+function buildAlbumTracks(client, album, tracks, requester) {
+    const lavalink = getLavalink(client);
 
-    const songs = tracks.map((track) =>
-        new Song({
-            plugin: spotify,
-            source: "album",
-            playFromSource: false,
-            name: track.name,
-            url: album.url || `https://itunes.apple.com/album/${album.id}`,
-            thumbnail: track.thumbnail ?? album.thumbnail,
-            uploader: { name: track.artist || album.artist },
-            duration: track.duration || 0
-        })
+    return tracks.map((track) =>
+        lavalink.utils.buildUnresolvedTrack(
+            {
+                info: {
+                    title: track.name,
+                    author: track.artist || album.artist || "Unknown artist",
+                    duration: (track.duration || 0) * 1000,
+                    artworkUrl: track.thumbnail ?? album.thumbnail ?? null
+                }
+            },
+            requester
+        )
     );
-
-    if (!songs.length) return null;
-
-    return new Playlist({
-        plugin: spotify,
-        source: "album",
-        name: album.name,
-        url: album.url || `https://itunes.apple.com/album/${album.id}`,
-        thumbnail: album.thumbnail,
-        songs
-    });
 }
 
+function formatDuration(ms) {
+    const total = Math.max(0, Math.floor((ms || 0) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 function progressBar(current, total, size = 14) {
     const ratio = total > 0 ? Math.min(Math.max(current / total, 0), 1) : 0;
@@ -244,28 +375,29 @@ function safeUrl(url) {
     return typeof url === "string" && /^https?:\/\/\S+$/i.test(url) ? url : null;
 }
 
-function songFields(song, queue) {
+function trackFields(track, player) {
+    const info = track?.info ?? {};
     const fields = [];
-    const url = safeUrl(song.url);
+    const url = safeUrl(info.uri);
 
     if (url) {
-        fields.push({ name: "Link", value: `[${song.name ?? "Open in browser"}](${url})`, inline: false });
+        fields.push({ name: "Link", value: `[${info.title ?? "Open in browser"}](${url})`, inline: false });
     }
 
     fields.push({
         name: "Duration",
-        value: song.isLive ? "📡 Live stream" : (song.formattedDuration || formatDuration(song.duration)),
+        value: info.isStream ? "📡 Live stream" : formatDuration(info.duration),
         inline: true
     });
 
-    if (song.uploader?.name) {
-        fields.push({ name: "Uploader", value: song.uploader.name.slice(0, 100), inline: true });
+    if (info.author) {
+        fields.push({ name: "Artist", value: String(info.author).slice(0, 100), inline: true });
     }
 
-    if (queue) {
+    if (player?.queue.current === track && !info.isStream && info.duration > 0) {
         fields.push({
             name: "Progress",
-            value: `${progressBar(queue.currentTime, song.duration)} ${queue.formattedCurrentTime} / ${song.formattedDuration}`,
+            value: `${progressBar(player.position, info.duration)} ${formatDuration(player.position)} / ${formatDuration(info.duration)}`,
             inline: false
         });
     }
@@ -273,49 +405,53 @@ function songFields(song, queue) {
     return fields;
 }
 
-function nowPlayingEmbed(song, queue, color = config.colors.primary) {
+function nowPlayingEmbed(track, player, color = config.colors.primary) {
+    const info = track?.info ?? {};
+
     return embed({
         color,
         title: "🎵 Now playing",
-        url: safeUrl(song.url),
-        thumbnail: safeUrl(song.thumbnail),
-        fields: songFields(song, queue),
+        url: safeUrl(info.uri),
+        thumbnail: safeUrl(info.artworkUrl),
+        fields: trackFields(track, player),
         timestamp: false
     });
 }
 
-function songLine(song, label) {
-    const url = safeUrl(song.url);
-    const title = song.name ?? "Unknown";
-    const when = song.isLive ? "live" : (song.formattedDuration ?? "unknown length");
-    const by = song.requestedBy?.tag ? ` • ${song.requestedBy.tag}` : "";
+function songLine(track, label) {
+    const info = track?.info ?? {};
+    const url = safeUrl(info.uri);
+    const title = info.title ?? "Unknown";
+    const when = info.isStream ? "live" : formatDuration(info.duration);
+    const by = track?.requester?.tag ? ` • ${track.requester.tag}` : "";
+
     return url ? `**${label}.** [${title}](${url}) • ${when}${by}` : `**${label}.** ${title} • ${when}${by}`;
 }
 
-function queueList(queue, max = 10) {
-    const upcoming = queue.songs.slice(1);
+function queueList(player, max = 10) {
+    const upcoming = player?.queue?.tracks ?? [];
     if (!upcoming.length) return "Nothing else is queued.";
 
-    const lines = upcoming.slice(0, max).map((song, index) => songLine(song, index + 1));
+    const lines = upcoming.slice(0, max).map((track, index) => songLine(track, index + 1));
 
     if (upcoming.length > max) lines.push(`…and ${upcoming.length - max} more`);
 
     return lines.join("\n");
 }
 
-function totalDuration(queue) {
-    const seconds = queue.songs.reduce((sum, song) => sum + (song.duration || 0), 0);
-    return formatDuration(seconds);
+function totalDuration(player) {
+    const tracks = [player?.queue?.current, ...(player?.queue?.tracks ?? [])].filter(Boolean);
+    const milliseconds = tracks.reduce((sum, track) => sum + (track.info?.duration || 0), 0);
+
+    return formatDuration(milliseconds);
 }
 
 const SPOTIFY_URI = /^spotify:(track|album|playlist|artist|episode|show):([A-Za-z0-9]{10,})$/i;
 /**
  * Rewrites `spotify:playlist:ID` share links to their open.spotify.com form.
  *
- * DisTube only consults URL plugins when the input passes `isURL()`, which
- * rejects every `spotify:` URI, so those links would otherwise be treated as
- * a search term and fail with CANNOT_RESOLVE_SONG. Spotify share links are
- * common on mobile, so they need converting before playback.
+ * Lavalink source plugins match on HTTP links, so the bare URI form would
+ * otherwise be treated as a search term and fail.
  */
 function normalizeQuery(query) {
     const match = SPOTIFY_URI.exec(String(query ?? "").trim());
@@ -326,20 +462,25 @@ function normalizeQuery(query) {
 }
 
 module.exports = {
-    getDistube,
-    getQueue,
+    getLavalink,
+    initMusic,
+    describeLavalink,
+    getPlayer,
+    ensurePlayer,
+    searchTracks,
+    addTracks,
     requireQueue,
     requireVoice,
     requireSameVoice,
     resolveVoice,
     isConnected,
-    buildAlbumPlaylist,
-    prefetchNextSong,
+    buildAlbumTracks,
     normalizeQuery,
     nowPlayingEmbed,
     queueList,
     totalDuration,
     progressBar,
     safeUrl,
-    songLine
+    songLine,
+    formatDuration
 };

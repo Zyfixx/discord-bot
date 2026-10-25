@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { done, fail, requireGuild } = require("../utils/feedback");
-const { getDistube } = require("../utils/music");
+const { getPlayer } = require("../utils/music");
 
 module.exports = {
     group: "music",
@@ -14,20 +14,13 @@ module.exports = {
     async execute(ctx) {
         if (!requireGuild(ctx)) return;
 
-        const distube = getDistube(ctx.client);
-        const guild = ctx.guild;
+        const player = getPlayer(ctx);
 
-        // A finished or stopped queue leaves the connection behind, so check the
-        // voice manager as well as the queue before reporting nothing to do.
-        const connected = distube.getQueue(guild)?.voice ?? distube.voices?.get(guild.id);
-
-        if (!connected) {
+        if (!player?.voiceChannelId) {
             return fail(ctx, "Not connected", "I am not in a voice channel in this server.");
         }
 
-        // DisTubeBase has no leave(); it lives on the voice manager, which also
-        // handles the case where the queue is gone but the connection remains.
-        distube.voices.leave(guild);
+        await player.destroy("Left by command");
 
         return done(ctx, {
             title: "👋 Left",

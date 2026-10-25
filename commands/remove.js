@@ -21,9 +21,9 @@ module.exports = {
         ),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
         const raw = ctx.args[0]?.toString();
         const position = Number(raw);
@@ -32,17 +32,20 @@ module.exports = {
             return fail(ctx, "Bad position", "Give me a queue position of 1 or higher.");
         }
 
-        if (position > queue.songs.length - 1) {
-            return fail(ctx, "Out of range", `The queue only has **${queue.songs.length - 1}** upcoming song(s).`);
+        if (position > player.queue.tracks.length) {
+            return fail(ctx, "Out of range", `The queue only has **${player.queue.tracks.length}** upcoming song(s).`);
         }
 
-        const [removed] = queue.songs.splice(position, 1);
+        const removed = player.queue.tracks[position - 1];
+        await player.queue.splice(position - 1, 1);
+
+        const url = safeUrl(removed.info?.uri);
 
         return done(ctx, {
             title: "🗑️ Removed",
-            description: safeUrl(removed.url)
-                ? `Removed [${removed.name ?? "unknown song"}](${removed.url}) from the queue.`
-                : `Removed ${removed.name ?? "the song"} from the queue.`
+            description: url
+                ? `Removed [${removed.info?.title ?? "unknown song"}](${url}) from the queue.`
+                : `Removed ${removed.info?.title ?? "the song"} from the queue.`
         });
     }
 };

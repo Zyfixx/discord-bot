@@ -11,11 +11,11 @@ module.exports = {
     data: new SlashCommandBuilder().setName("stop").setDescription("Stops the music and clears the queue."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
-        await queue.stop();
+        await player.stopPlaying(true);
 
         return done(ctx, {
             title: "🛑 Stopped",

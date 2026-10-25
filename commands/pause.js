@@ -10,17 +10,17 @@ module.exports = {
     data: new SlashCommandBuilder().setName("pause").setDescription("Pauses the current song."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
-        if (queue.paused) return fail(ctx, "Already paused", "The music is already paused.");
+        if (player.paused) return fail(ctx, "Already paused", "The music is already paused.");
 
-        const song = queue.songs[0];
-        await queue.pause();
+        const track = player.queue.current;
+        await player.pause();
 
         return ctx.respond({
-            embeds: [nowPlayingEmbed(song, queue, config.colors.warning).setTitle("⏸️ Paused")]
+            embeds: [nowPlayingEmbed(track, player, config.colors.warning).setTitle("⏸️ Paused")]
         });
     }
 };

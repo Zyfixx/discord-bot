@@ -24,9 +24,9 @@ module.exports = {
         ),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
         const raw = ctx.args[0]?.toString();
         if (raw === undefined) return fail(ctx, "No volume given", "Tell me a number between 0 and 100.");
@@ -34,7 +34,7 @@ module.exports = {
         const level = Math.min(Math.max(Number(raw), 0), 100);
         if (Number.isNaN(level)) return fail(ctx, "Bad volume", "Volume must be a number between 0 and 100.");
 
-        queue.setVolume(level);
+        await player.setVolume(level);
 
         return done(ctx, {
             title: "🔊 Volume updated",

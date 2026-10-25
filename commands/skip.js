@@ -9,26 +9,27 @@ module.exports = {
     data: new SlashCommandBuilder().setName("skip").setDescription("Skips the current song."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
-        const current = queue.songs[0];
+        const current = player.queue.current;
 
-        if (queue.songs.length <= 1) {
-            await queue.stop();
+        if (!player.queue.tracks.length) {
+            await player.stopPlaying(true);
             return fail(ctx, "Queue finished", "That was the last song, so I stopped the music.");
         }
 
-        await queue.skip();
+        const next = player.queue.tracks[0];
+        await player.skip();
 
-        const next = queue.songs[0];
-        const nowPlaying = nowPlayingEmbed(next, queue);
-        const skipped = safeUrl(current?.url)
-            ? `[${current?.name ?? "unknown"}](${current.url})`
-            : (current?.name ?? "the current song");
+        const nowPlaying = nowPlayingEmbed(next, player);
+        const currentUrl = safeUrl(current?.info?.uri);
+        const skipped = currentUrl
+            ? `[${current?.info?.title ?? "unknown"}](${currentUrl})`
+            : (current?.info?.title ?? "the current song");
 
-        nowPlaying.setDescription(`⏭️ Skipped ${skipped}.\n\nNow playing **${next.name ?? "unknown"}**.`);
+        nowPlaying.setDescription(`⏭️ Skipped ${skipped}.\n\nNow playing **${next?.info?.title ?? "unknown"}**.`);
 
         return ctx.respond({ embeds: [nowPlaying] });
     }

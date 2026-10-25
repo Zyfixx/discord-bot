@@ -9,23 +9,23 @@ module.exports = {
     data: new SlashCommandBuilder().setName("queue").setDescription("Shows the songs lined up next."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
 
-        const song = queue.songs[0];
-        if (!song) return;
+        const track = player.queue.current;
+        if (!track) return;
 
-        const nowPlaying = nowPlayingEmbed(song, queue).setTitle("🎶 Queue");
+        const nowPlaying = nowPlayingEmbed(track, player).setTitle("🎶 Queue");
         nowPlaying.addFields({
-            name: `Up next (${Math.max(queue.songs.length - 1, 0)})`,
-            value: queueList(queue),
+            name: `Up next (${player.queue.tracks.length})`,
+            value: queueList(player),
             inline: false
         });
 
-        if (queue.songs.length > 1) {
+        if (player.queue.tracks.length > 0) {
             nowPlaying.addFields({
                 name: "Total length",
-                value: totalDuration(queue),
+                value: totalDuration(player),
                 inline: true
             });
         }

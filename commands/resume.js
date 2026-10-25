@@ -9,17 +9,17 @@ module.exports = {
     data: new SlashCommandBuilder().setName("resume").setDescription("Resumes the paused song."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
-        if (!queue.paused) return fail(ctx, "Not paused", "The music is already playing.");
+        if (!player.paused) return fail(ctx, "Not paused", "The music is already playing.");
 
-        const song = queue.songs[0];
-        await queue.resume();
+        const track = player.queue.current;
+        await player.resume();
 
         return ctx.respond({
-            embeds: [nowPlayingEmbed(song, queue).setTitle("▶️ Resumed")]
+            embeds: [nowPlayingEmbed(track, player).setTitle("▶️ Resumed")]
         });
     }
 };

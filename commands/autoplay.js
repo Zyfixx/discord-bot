@@ -16,11 +16,12 @@ module.exports = {
         .setDescription("Toggles autoplay, which keeps playing similar tracks when the queue ends."),
 
     async execute(ctx) {
-        const queue = requireQueue(ctx);
-        if (!queue) return;
-        if (!requireSameVoice(ctx, queue)) return;
+        const player = requireQueue(ctx);
+        if (!player) return;
+        if (!requireSameVoice(ctx, player)) return;
 
-        const enabled = queue.toggleAutoplay();
+        const enabled = !player.getData("autoplay");
+        player.setData("autoplay", enabled);
         const color = enabled ? config.colors.success : config.colors.neutral;
 
         const description = enabled

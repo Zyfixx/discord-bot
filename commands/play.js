@@ -1,7 +1,16 @@
 const { SlashCommandBuilder } = require("discord.js");
 const config = require("../config");
-const { done, fail, requireGuild } = require("../utils/feedback");
-const { getDistube, normalizeQuery, resolveVoice, queueList, safeUrl } = require("../utils/music");
+const { embed, requireGuild } = require("../utils/feedback");
+const {
+    ensurePlayer,
+    addTracks,
+    formatDuration,
+    normalizeQuery,
+    queueList,
+    resolveVoice,
+    safeUrl,
+    searchTracks
+} = require("../utils/music");
 
 module.exports = {
     group: "music",
@@ -12,8 +21,8 @@ module.exports = {
         "play spotify:album:2guirTSEqLizK7j9i1MTTZ"
     ],
     help: [
-        "Spotify track, album, playlist and artist links work, including `spotify:` share links.",
-        "Only the details come from Spotify — the audio is matched on YouTube."
+        "Links and search terms are resolved by the Lavalink server.",
+        "Spotify links need the LavaSrc plugin on that server."
     ].join("\n"),
 
     data: new SlashCommandBuilder()
@@ -31,45 +40,135 @@ module.exports = {
         if (!requireGuild(ctx)) return;
 
         const query = normalizeQuery(ctx.text());
-        if (!query) return fail(ctx, "Nothing to play", "Give me a song name, link, or search term.");
+        if (!query) {
+            return ctx.respond({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Nothing to play",
+                        description: "Give me a song name, link, or search term.",
+                        timestamp: false
+                    })
+                ]
+            });
+        }
 
         const voice = resolveVoice(ctx);
         if (!voice) return;
 
-        const distube = getDistube(ctx.client);
-        const existing = distube.getQueue(ctx.guild);
-        const position = existing?.songs.length ?? 0;
+        await ctx.respond({
+            embeds: [
+                embed({
+                    color: config.colors.info,
+                    title: "🔎 Looking that up",
+                    description: `Searching for **${query}**…`,
+                    timestamp: false
+                })
+            ]
+        });
+
+        let player;
 
         try {
-            await distube.play(voice, query, {
-                member: ctx.member,
-                textChannel: ctx.channel
-            });
+            player = await ensurePlayer(ctx, voice);
         } catch (error) {
-            return fail(ctx, "Could not play that", error.message);
-        }
-
-        const queue = distube.getQueue(ctx.guild);
-        const song = queue?.songs?.[position];
-
-        if (position === 0 && song) {
-            return done(ctx, {
-                title: "🎵 Added to queue",
-                description: safeUrl(song.url) ? `[${song.name ?? query}](${song.url})` : (song.name ?? query),
-                thumbnail: safeUrl(song.thumbnail),
-                fields: song.formattedDuration
-                    ? [{ name: "Duration", value: song.formattedDuration, inline: true }]
-                    : null
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Could not join",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
             });
         }
 
-        if (song) {
-            return done(ctx, {
-                title: "➕ Added to queue",
-                description: safeUrl(song.url) ? `[${song.name ?? query}](${song.url})` : (song.name ?? query),
-                thumbnail: safeUrl(song.thumbnail),
-                fields: [{ name: "Up next", value: queueList(queue), inline: false }]
+        const position = player.queue.current ? player.queue.tracks.length + 1 : player.queue.tracks.length;
+
+        let result;
+
+        try {
+            result = await searchTracks(player, query, ctx.author);
+        } catch (error) {
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Could not play that",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
             });
         }
+
+        const tracks = result.playlist ? result.tracks : [result.tracks[0]];
+
+        try {
+            await addTracks(player, tracks);
+        } catch (error) {
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Could not play that",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
+            });
+        }
+
+        const first = tracks[0];
+
+        if (result.playlist) {
+            const playlistUrl = safeUrl(result.playlist.uri);
+
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.success,
+                        title: "🎵 Playlist added",
+                        description: playlistUrl
+                            ? `[${result.playlist.name ?? "Playlist"}](${playlistUrl}) • ${tracks.length} tracks`
+                            : `${result.playlist.name ?? "Playlist"} • ${tracks.length} tracks`,
+                        thumbnail: safeUrl(result.playlist.thumbnail) ?? safeUrl(first.info.artworkUrl),
+                        fields:
+                            position > 0
+                                ? [{ name: "Up next", value: queueList(player), inline: false }]
+                                : null,
+                        timestamp: false
+                    })
+                ]
+            });
+        }
+
+        const url = safeUrl(first.info.uri);
+        const name = first.info.title ?? query;
+        const fields = [
+            {
+                name: "Duration",
+                value: first.info.isStream ? "📡 Live stream" : formatDuration(first.info.duration),
+                inline: true
+            }
+        ];
+
+        if (position > 0) {
+            fields.push({ name: "Up next", value: queueList(player), inline: false });
+        }
+
+        return ctx.edit({
+            embeds: [
+                embed({
+                    color: config.colors.success,
+                    title: position === 0 ? "🎵 Added to queue" : "➕ Added to queue",
+                    description: url ? `[${name}](${url})` : name,
+                    thumbnail: safeUrl(first.info.artworkUrl),
+                    fields,
+                    timestamp: false
+                })
+            ]
+        });
     }
 };

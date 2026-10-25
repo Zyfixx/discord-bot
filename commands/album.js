@@ -1,11 +1,11 @@
 const { SlashCommandBuilder } = require("discord.js");
 const config = require("../config");
-const { done, fail, requireGuild, warn } = require("../utils/feedback");
-const { getDistube, resolveVoice, safeUrl, buildAlbumPlaylist } = require("../utils/music");
+const { embed, fail, requireGuild } = require("../utils/feedback");
+const { addTracks, buildAlbumTracks, ensurePlayer, resolveVoice, safeUrl } = require("../utils/music");
 const { searchAlbum, albumTracks } = require("../utils/albums");
 
 const SUBSTITUTION_NOTE = ""
-    // "Only the tracklist comes from the album lookup — every track is matched on YouTube when it starts.";
+    // "Only the tracklist comes from the album lookup — every track is matched through Lavalink when it starts.";
 
 function formatLength(seconds) {
     const total = Math.max(0, Math.round(seconds || 0));
@@ -44,10 +44,25 @@ module.exports = {
         }
 
         const query = ctx.text();
-        if (!query) return fail(ctx, "Nothing to search", "Give me an album name to look for.");
+        if (!query) {
+            return fail(ctx, "Nothing to search", "Give me an album name to look for.");
+        }
 
         const voice = resolveVoice(ctx);
         if (!voice) return;
+
+        // Matching the opening track takes as long as any other lookup, so
+        // acknowledge the request before starting it.
+        await ctx.respond({
+            embeds: [
+                embed({
+                    color: config.colors.info,
+                    title: "🔎 Looking that up",
+                    description: `Searching for the album **${query}**…`,
+                    timestamp: false
+                })
+            ]
+        });
 
         let album;
         let tracks;
@@ -56,42 +71,98 @@ module.exports = {
             album = await searchAlbum(query);
             if (album) tracks = await albumTracks(album.id);
         } catch (error) {
-            return fail(ctx, "Album lookup failed", error.message);
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Album lookup failed",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
+            });
         }
 
         if (!album) {
-            return fail(ctx, "No album found", `Nothing matched **${query}**. Try adding the artist name too.`);
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ No album found",
+                        description: `Nothing matched **${query}**. Try adding the artist name too.`,
+                        timestamp: false
+                    })
+                ]
+            });
         }
 
         if (!tracks?.length) {
-            return fail(ctx, "No tracklist", `I found **${album.name}** but it has no tracks listed.`);
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ No tracklist",
+                        description: `I found **${album.name}** but it has no tracks listed.`,
+                        timestamp: false
+                    })
+                ]
+            });
         }
 
-        // Building every track as a Song here is instant, because they carry no
-        // audio data. YouTube is only searched for a track as it starts playing,
-        // so a full album is queued immediately instead of after a long wait.
-        const playlist = buildAlbumPlaylist(ctx.client, album, tracks.slice(0, config.albums.maxTracks));
-
-        if (!playlist) {
-            return fail(ctx, "Album unavailable", "The music plugins are not ready yet, try again in a moment.");
-        }
-
-        const distube = getDistube(ctx.client);
-        const existing = distube.getQueue(ctx.guild);
-        const position = existing?.songs.length ?? 0;
+        // Each track is queued as an unresolved entry: the album metadata is
+        // kept, and Lavalink only searches for a match when that track starts.
         const capped = tracks.slice(0, config.albums.maxTracks);
+        const albumTracks = buildAlbumTracks(ctx.client, album, capped, ctx.author);
+
+        // The album is known by now, so the waiting message can name it while the
+        // opening track is matched by Lavalink.
+        await ctx.edit({
+            embeds: [
+                embed({
+                    color: config.colors.info,
+                    title: `💿 ${album.name}`,
+                    description: `Adding ${capped.length} tracks, matching the first one…`,
+                    thumbnail: safeUrl(album.thumbnail),
+                    timestamp: false
+                })
+            ]
+        });
+
+        let player;
 
         try {
-            await distube.play(voice, playlist, {
-                member: ctx.member,
-                textChannel: ctx.channel
-            });
+            player = await ensurePlayer(ctx, voice);
         } catch (error) {
-            return fail(ctx, "Could not queue that album", error.message);
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Could not join",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
+            });
         }
 
-        const queue = distube.getQueue(ctx.guild);
-        const added = (queue?.songs.length ?? 0) - position;
+        const position = player.queue.current ? player.queue.tracks.length + 1 : player.queue.tracks.length;
+
+        try {
+            await addTracks(player, albumTracks);
+        } catch (error) {
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.danger,
+                        title: "✗ Could not queue that album",
+                        description: error.message,
+                        timestamp: false
+                    })
+                ]
+            });
+        }
+
+        const added = (player.queue.current ? player.queue.tracks.length + 1 : player.queue.tracks.length) - position;
 
         const fields = [
             { name: "Artist", value: album.artist || "Unknown", inline: true },
@@ -100,19 +171,29 @@ module.exports = {
         ];
 
         if (tracks.length > capped.length) {
-            return warn(ctx, {
-                title: `💿 ${album.name}`,
-                description: `Added the first ${capped.length} of ${tracks.length} tracks. ${SUBSTITUTION_NOTE}`,
-                thumbnail: safeUrl(album.thumbnail),
-                fields
+            return ctx.edit({
+                embeds: [
+                    embed({
+                        color: config.colors.warning,
+                        title: `💿 ${album.name}`,
+                        description: `Added the first ${capped.length} of ${tracks.length} tracks. ${SUBSTITUTION_NOTE}`,
+                        thumbnail: safeUrl(album.thumbnail),
+                        fields
+                    })
+                ]
             });
         }
 
-        return done(ctx, {
-            title: `💿 ${album.name}`,
-            description: `Added ${added} ${added === 1 ? "track" : "tracks"}. ${SUBSTITUTION_NOTE}`,
-            thumbnail: safeUrl(album.thumbnail),
-            fields
+        return ctx.edit({
+            embeds: [
+                embed({
+                    color: config.colors.success,
+                    title: `💿 ${album.name}`,
+                    description: `Added ${added} ${added === 1 ? "track" : "tracks"}. ${SUBSTITUTION_NOTE}`,
+                    thumbnail: safeUrl(album.thumbnail),
+                    fields
+                })
+            ]
         });
     }
 };

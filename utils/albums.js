@@ -2,8 +2,8 @@
  * Album lookup for the /album command.
  *
  * Deezer's public API is used because it needs no credentials and returns an
- * ordered tracklist. It only supplies metadata: the audio still comes from
- * YouTube, because these tracks are not streamable here.
+ * ordered tracklist. It only supplies metadata: the audio is matched through
+ * Lavalink when each track starts.
  *
  * Ranking is deliberately left to the provider. Its relevance order already puts
  * the original record first, and re-scoring it by hand was measurably worse: it
